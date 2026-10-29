@@ -1,0 +1,60 @@
+name: RidgeLineOverland
+options:
+  bundleIdPrefix: com.ridgeline
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  RidgeLineOverland:
+    type: application
+    platform: iOS
+    sources:
+      - path: RidgeLine
+        excludes:
+          - Info.plist
+    info:
+      path: RidgeLine/Info.plist
+      properties:
+        CFBundleDisplayName: RidgeLine Overland
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Light
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.travel
+        NSLocationWhenInUseUsageDescription: RidgeLine Overland shows your live GPS position on the trail map, even when you have no cell service. Your location never leaves your device.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ridgeline.overland
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+  RidgeLineOverlandTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - RidgeLineTests
+    dependencies:
+      - target: RidgeLineOverland
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ridgeline.overland.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  RidgeLineOverland:
+    build:
+      targets:
+        RidgeLineOverland: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - RidgeLineOverlandTests
