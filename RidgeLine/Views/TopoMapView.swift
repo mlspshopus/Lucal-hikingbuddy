@@ -2,10 +2,38 @@ import SwiftUI
 import MapKit
 
 enum MapLayer: String, CaseIterable, Identifiable {
-    case topo = "Topo"
-    case satellite = "Satellite"
-    case hybrid = "Hybrid"
+    case topo, aerial, aerialTopo, relief, appleSatellite, appleHybrid
+
     var id: String { rawValue }
+
+    /// The USGS tile source behind this layer, if any. Those layers can be saved for offline use.
+    var tileSource: TileSource? {
+        switch self {
+        case .topo: return .topo
+        case .aerial: return .aerial
+        case .aerialTopo: return .aerialTopo
+        case .relief: return .relief
+        case .appleSatellite, .appleHybrid: return nil
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .appleSatellite: return "Apple Satellite"
+        case .appleHybrid: return "Apple Hybrid"
+        default: return tileSource?.title ?? rawValue
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .appleSatellite: return "globe.americas.fill"
+        case .appleHybrid: return "globe.americas"
+        default: return tileSource?.symbol ?? "map"
+        }
+    }
+
+    var worksOffline: Bool { tileSource != nil }
 }
 
 /// Imperative handle so SwiftUI buttons can drive the UIKit map (recenter, fit, read visible region).
@@ -95,9 +123,9 @@ struct TopoMapView: UIViewRepresentable {
 
             if layerChanged {
                 switch parent.layer {
-                case .topo: map.mapType = .mutedStandard
-                case .satellite: map.mapType = .satellite
-                case .hybrid: map.mapType = .hybrid
+                case .appleSatellite: map.mapType = .satellite
+                case .appleHybrid: map.mapType = .hybrid
+                default: map.mapType = .mutedStandard   // shown while USGS tiles load
                 }
                 lastLayer = parent.layer
             }
@@ -111,8 +139,8 @@ struct TopoMapView: UIViewRepresentable {
             if layerChanged || routeSig != lastRouteSignature {
                 // Rebuild in z-order: the topo tile layer first, then trail lines on top of it.
                 map.removeOverlays(map.overlays)
-                if parent.layer == .topo {
-                    map.addOverlay(CachedTileOverlay(), level: .aboveLabels)
+                if let source = parent.layer.tileSource {
+                    map.addOverlay(CachedTileOverlay(source: source), level: .aboveLabels)
                 }
                 // Inactive routes first so the active one draws on top.
                 let ordered = parent.routes.sorted { ($0.id == parent.activeRouteID ? 1 : 0) < ($1.id == parent.activeRouteID ? 1 : 0) }

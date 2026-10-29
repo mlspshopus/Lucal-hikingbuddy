@@ -2,19 +2,18 @@ import SwiftUI
 
 struct ChecklistView: View {
     private enum Mode: String, CaseIterable, Identifiable {
-        case gear = "Truck & Trail Gear"
-        case food = "Food & Buy List"
+        case gear = "Gear"
+        case food = "Food"
+        case games = "Games"
         var id: String { rawValue }
     }
 
     @EnvironmentObject private var store: TripStore
     @State private var mode: Mode = .gear
 
-    @State private var addGearCategory: String?
-    @State private var showAddGear = false
-    @State private var showAddFood = false
-    @State private var newName = ""
-    @State private var newCost = ""
+    @State private var showGearSuggestions = false
+    @State private var showFoodSuggestions = false
+    @State private var isEditing = false
     @State private var confirmReset = false
 
     private var trip: Trip { store.trip }
@@ -31,6 +30,7 @@ struct ChecklistView: View {
                     switch mode {
                     case .gear: gearContent
                     case .food: foodContent
+                    case .games: GamesSection()
                     }
                 }
                 .padding(16)
@@ -39,38 +39,38 @@ struct ChecklistView: View {
             .navigationTitle("Checklists")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { confirmReset = true } label: {
-                        Image(systemName: "arrow.counterclockwise").frame(minWidth: 44, minHeight: 44)
+                    Menu {
+                        if mode != .games {
+                            Button {
+                                isEditing.toggle()
+                            } label: {
+                                Label(isEditing ? "Done Removing" : "Remove Items…",
+                                      systemImage: isEditing ? "checkmark" : "minus.circle")
+                            }
+                        }
+                        Button(role: .destructive) { confirmReset = true } label: {
+                            Label("Reset Progress…", systemImage: "arrow.counterclockwise")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44)
                     }
-                    .accessibilityLabel("Reset checklists")
+                    .accessibilityLabel("List options")
                 }
                 ToolbarItem(placement: .topBarTrailing) { TripMenuButton() }
             }
-            .confirmationDialog("Reset this trip's checklists?", isPresented: $confirmReset, titleVisibility: .visible) {
+            .onChange(of: mode) { _, _ in isEditing = false }
+            .confirmationDialog("Reset this trip's progress?", isPresented: $confirmReset, titleVisibility: .visible) {
                 Button("Move All Gear Back to “At Home”", role: .destructive) { store.setStage(.atHome, forCategory: nil) }
                 Button("Uncheck All Food", role: .destructive) {
                     store.update { t in for i in t.food.indices { t.food[i].bought = false } }
                 }
+                Button("Unpack All Games", role: .destructive) {
+                    store.update { t in for i in t.games.indices { t.games[i].packed = false } }
+                }
                 Button("Cancel", role: .cancel) {}
             }
-            .alert("Add Gear Item", isPresented: $showAddGear) {
-                TextField("Item name", text: $newName)
-                Button("Add") {
-                    if let c = addGearCategory { store.addGear(name: newName, category: c) }
-                    newName = ""
-                }
-                Button("Cancel", role: .cancel) { newName = "" }
-            }
-            .alert("Add Food Item", isPresented: $showAddFood) {
-                TextField("Item name", text: $newName)
-                TextField("Estimated cost (e.g. 8.50)", text: $newCost).keyboardType(.decimalPad)
-                Button("Add") {
-                    store.addFood(name: newName, cost: Double(newCost) ?? 0)
-                    newName = ""
-                    newCost = ""
-                }
-                Button("Cancel", role: .cancel) { newName = ""; newCost = "" }
-            }
+            .sheet(isPresented: $showGearSuggestions) { SuggestionsSheet(kind: .gear) }
+            .sheet(isPresented: $showFoodSuggestions) { SuggestionsSheet(kind: .food) }
         }
     }
 
@@ -100,6 +100,17 @@ struct ChecklistView: View {
                     .font(RL.font(.footnote)).foregroundStyle(RL.slate)
             }
             .rlCard()
+
+            Button { showGearSuggestions = true } label: {
+                Label("Browse Suggestions — Tap + to Add", systemImage: "plus.circle.fill")
+            }
+            .buttonStyle(PrimaryButtonStyle(tint: RL.blaze))
+
+            if isEditing {
+                Label("Tap the red minus next to anything you don't need.", systemImage: "minus.circle.fill")
+                    .font(RL.font(.subheadline, .semibold)).foregroundStyle(RL.blaze)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             ForEach(trip.gearCategories, id: \.self) { category in
                 gearCategoryCard(category)
@@ -133,11 +144,7 @@ struct ChecklistView: View {
                     Button("Mark All Packed") { store.setStage(.packed, forCategory: category) }
                     Button("Reset to At Home") { store.setStage(.atHome, forCategory: category) }
                     Divider()
-                    Button("Add Item…") {
-                        addGearCategory = category
-                        newName = ""
-                        showAddGear = true
-                    }
+                    Button("Add Suggestions…") { showGearSuggestions = true }
                 } label: {
                     Image(systemName: "ellipsis.circle.fill")
                         .font(.title3).foregroundStyle(RL.pine)
@@ -148,13 +155,23 @@ struct ChecklistView: View {
             ForEach(items) { item in
                 VStack(alignment: .leading, spacing: 8) {
                     Divider().overlay(RL.border)
-                    Text(item.name).font(RL.font(.body, .semibold)).foregroundStyle(RL.ink)
-                    Text(item.detail).font(RL.font(.footnote)).foregroundStyle(RL.slate)
+                    HStack(alignment: .top, spacing: 8) {
+                        if isEditing {
+                            Button { withAnimation { store.deleteGear(item.id) } } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .font(.system(size: 28)).foregroundStyle(RL.blaze)
+                                    .frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel("Remove \(item.name)")
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.name).font(RL.font(.body, .semibold)).foregroundStyle(RL.ink)
+                            Text(item.detail).font(RL.font(.footnote)).foregroundStyle(RL.slate)
+                        }
+                        Spacer(minLength: 0)
+                    }
                     StagePill(stage: item.stage, vehicle: trip.vehicleShort) { store.cycleStage(item.id) }
                         .accessibilityLabel("\(item.name): \(item.stage.label(vehicle: trip.vehicleShort)). Double tap to advance.")
-                }
-                .contextMenu {
-                    Button("Delete Item", role: .destructive) { store.deleteGear(item.id) }
                 }
             }
         }
@@ -185,24 +202,71 @@ struct ChecklistView: View {
             }
             .rlCard()
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(trip.food.enumerated()), id: \.element.id) { index, item in
-                    if index > 0 { Divider().overlay(RL.border) }
-                    foodRow(item)
+            quickAddCard
+
+            Button { showFoodSuggestions = true } label: {
+                Label("Browse All Food Ideas — Tap + to Add", systemImage: "plus.circle.fill")
+            }
+            .buttonStyle(PrimaryButtonStyle(tint: RL.blaze))
+
+            if isEditing {
+                Label("Tap the red minus next to anything you don't need.", systemImage: "minus.circle.fill")
+                    .font(RL.font(.subheadline, .semibold)).foregroundStyle(RL.blaze)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            ForEach(foodCategories, id: \.self) { cat in
+                let items = trip.food.filter { ($0.category ?? "Essentials") == cat }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(cat).font(RL.font(.headline, .bold)).foregroundStyle(RL.ink).padding(.bottom, 4)
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { Divider().overlay(RL.border) }
+                        foodRow(item)
+                    }
                 }
-                Divider().overlay(RL.border)
-                Button {
-                    newName = ""
-                    newCost = ""
-                    showAddFood = true
-                } label: {
-                    Label("Add Item", systemImage: "plus.circle.fill")
-                        .font(RL.font(.subheadline, .bold)).foregroundStyle(RL.pine)
-                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .rlCard()
+            }
+        }
+    }
+
+    private var foodCategories: [String] {
+        var seen = Set<String>()
+        return trip.food.compactMap { item in
+            let c = item.category ?? "Essentials"
+            return seen.insert(c).inserted ? c : nil
+        }
+    }
+
+    /// One-tap chips for the most useful things not on the list yet.
+    private var quickAddCard: some View {
+        let ideas = Suggestions.food.filter { !store.hasFood(named: $0.name) }.prefix(14)
+        return VStack(alignment: .leading, spacing: 8) {
+            SectionTitle(title: "Quick Add", symbol: "bolt.fill")
+            if ideas.isEmpty {
+                Text("You've added everything on the quick list. Browse all ideas for more.")
+                    .font(RL.font(.footnote)).foregroundStyle(RL.slate)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(Array(ideas)) { idea in
+                            Button {
+                                withAnimation { store.addSuggestion(idea) }
+                            } label: {
+                                Label("\(idea.name) · \(Fmt.usd(idea.cost))", systemImage: "plus")
+                                    .font(RL.font(.subheadline, .bold))
+                                    .foregroundStyle(RL.pine)
+                                    .padding(.horizontal, 12)
+                                    .frame(minHeight: 44)
+                                    .background(RL.pineTint)
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(RL.pine.opacity(0.4), lineWidth: 1))
+                            }
+                        }
+                    }
                 }
             }
-            .rlCard()
         }
+        .rlCard()
     }
 
     private func costTile(_ title: String, _ value: String, _ tint: Color) -> some View {
@@ -218,6 +282,20 @@ struct ChecklistView: View {
     }
 
     private func foodRow(_ item: FoodItem) -> some View {
+        HStack(spacing: 4) {
+            if isEditing {
+                Button { withAnimation { store.deleteFood(item.id) } } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 28)).foregroundStyle(RL.blaze)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Remove \(item.name)")
+            }
+            foodToggleRow(item)
+        }
+    }
+
+    private func foodToggleRow(_ item: FoodItem) -> some View {
         Button { store.toggleFood(item.id) } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: item.bought ? "checkmark.circle.fill" : "circle")
@@ -240,9 +318,6 @@ struct ChecklistView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(item.name), \(Fmt.usd(item.estCost)), \(item.bought ? "bought" : "not bought yet")")
-        .contextMenu {
-            Button("Delete Item", role: .destructive) { store.deleteFood(item.id) }
-        }
     }
 }
 

@@ -9,9 +9,9 @@ It ships pre-loaded for a 2-person trip from **Legacy at Fort Clarke (Gainesvill
 | Tab | What it does |
 | --- | --- |
 | **Trip Hub** | Route legs with one-tap Apple Maps / Google Maps directions, live sunrise/sunset/golden hour + 16-day forecast (Open-Meteo), and a must-see sights checklist. |
-| **Trail Map** | MapKit with Topo (USGS) / Satellite / Hybrid layers, live GPS blue dot, trail polylines, trailheads, the four free dispersed camps, GPX import, and offline topo tile caching. |
+| **Trail Map** | MapKit with four free USGS layers (Topo, Aerial, Aerial + Topo, Shaded Relief) plus Apple Satellite/Hybrid, live GPS blue dot, full-screen mode, trail lines with start points, distance and estimated time, the four free dispersed camps, GPX import, **Find Trails Near Here** (OpenStreetMap), and offline map saving by screen, trail corridor, all trails, or whole trip area. |
 | **Fuel** | Sliders for miles, MPG and gas price → gallons, tank fill-ups, total cost, per-person split, and a planned pit-stop timeline. |
-| **Checklists** | Pre-loaded gear (3-stage At Home → Driveway Staged → In RAM/Pack pill) and food/buy-list with estimated costs. No typing required. |
+| **Checklists** | Pre-loaded gear (3-stage At Home → Driveway Staged → In RAM/Pack pill), a food/buy list with estimated costs, 80+ gear and 60+ food suggestions you add with a plus button (and remove again), and a Games tab with card/dice/domino games, what to bring, and how to play. |
 
 ## Build
 
@@ -39,8 +39,9 @@ RidgeLine/
 RidgeLineTests/   Unit tests for everything in Core
 ```
 
-* **No API keys.** Weather is [Open-Meteo](https://open-meteo.com/); topo tiles are
-  [USGS The National Map](https://basemap.nationalmap.gov/); everything else is on-device.
+* **No API keys.** Weather and elevation are [Open-Meteo](https://open-meteo.com/); map tiles are
+  [USGS The National Map](https://basemap.nationalmap.gov/); nearby trails come from
+  [OpenStreetMap](https://www.openstreetmap.org/) via the Overpass API; everything else is on-device.
 * **Offline.** GPS needs no cell service. Use the download button on the map to save the visible area's topo tiles.
   Sunrise/sunset fall back to an on-device NOAA solar calculation, and the last forecast is cached.
 * **Multiple trips.** Everything lives in a `Trip` value saved to `Application Support/RidgeLine/trips.json`.

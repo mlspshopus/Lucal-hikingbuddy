@@ -142,6 +142,20 @@ struct FoodItem: Identifiable, Codable, Hashable {
     var detail: String
     var estCost: Double
     var bought: Bool = false
+    var category: String?
+}
+
+struct GameItem: Identifiable, Codable, Hashable {
+    var id: String
+    var name: String
+    var kind: String          // "Card game", "Dice game", "Tile game", "No props"
+    var players: String
+    var minutes: Int
+    var bring: String
+    var overview: String
+    var rules: [String]
+    var tip: String
+    var packed: Bool = false
 }
 
 // MARK: - Fuel
@@ -198,6 +212,7 @@ struct Trip: Identifiable, Codable, Hashable {
     var gear: [GearItem] = []
     var food: [FoodItem] = []
     var fuel = FuelPlan()
+    var games: [GameItem] = []
 
     var oneWayMiles: Int { legs.reduce(0) { $0 + $1.miles } }
     var oneWayMinutes: Int { legs.reduce(0) { $0 + $1.minutes } }
@@ -211,6 +226,36 @@ struct Trip: Identifiable, Codable, Hashable {
 
     var activeRoute: HikeRoute? {
         routes.first { $0.id == activeRouteID } ?? routes.first
+    }
+}
+
+// Trips saved by older versions lack newer keys, so decode everything leniently.
+extension Trip {
+    enum CodingKeys: String, CodingKey {
+        case id, name, subtitle, vehicle, vehicleShort, tripDate, timeZoneID, origin, destination
+        case places, routes, activeRouteID, legs, sights, gear, food, fuel, games
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
+        vehicle = try c.decodeIfPresent(String.self, forKey: .vehicle) ?? "Truck"
+        vehicleShort = try c.decodeIfPresent(String.self, forKey: .vehicleShort) ?? "Truck"
+        tripDate = try c.decodeIfPresent(Date.self, forKey: .tripDate) ?? Date()
+        timeZoneID = try c.decodeIfPresent(String.self, forKey: .timeZoneID)
+        origin = try c.decodeIfPresent(Place.self, forKey: .origin)
+        destination = try c.decodeIfPresent(Place.self, forKey: .destination)
+        places = try c.decodeIfPresent([Place].self, forKey: .places) ?? []
+        routes = try c.decodeIfPresent([HikeRoute].self, forKey: .routes) ?? []
+        activeRouteID = try c.decodeIfPresent(String.self, forKey: .activeRouteID)
+        legs = try c.decodeIfPresent([RouteLeg].self, forKey: .legs) ?? []
+        sights = try c.decodeIfPresent([Sight].self, forKey: .sights) ?? []
+        gear = try c.decodeIfPresent([GearItem].self, forKey: .gear) ?? []
+        food = try c.decodeIfPresent([FoodItem].self, forKey: .food) ?? []
+        fuel = try c.decodeIfPresent(FuelPlan.self, forKey: .fuel) ?? FuelPlan()
+        games = try c.decodeIfPresent([GameItem].self, forKey: .games) ?? Starter.games()
     }
 }
 
@@ -230,4 +275,30 @@ enum Fmt {
         if h == 0 { return "\(m) min" }
         return "\(h) hr \(m) min"
     }
+}
+
+// MARK: - Hike math
+
+enum HikeMath {
+    /// Casual pace: 2 mph plus 30 minutes for every 1,000 ft climbed (a conservative Naismith's rule).
+    static func minutes(miles: Double, gainFt: Int) -> Int {
+        Int((miles / 2.0 * 60 + Double(gainFt) / 1000 * 30).rounded())
+    }
+
+    /// Cumulative climb in feet. Ignores ±1 m jitter so sensor noise doesn't inflate the number.
+    static func gainFt(elevationsMeters e: [Double]) -> Int {
+        guard e.count > 1 else { return 0 }
+        var gain = 0.0
+        var anchor = e[0]
+        for v in e.dropFirst() {
+            if v - anchor > 1 { gain += v - anchor; anchor = v }
+            else if anchor - v > 1 { anchor = v }
+        }
+        return Int((gain * 3.28084).rounded())
+    }
+}
+
+extension HikeRoute {
+    var estimatedMinutes: Int { HikeMath.minutes(miles: miles, gainFt: gainFt) }
+    var startCoord: Coord? { path.first }
 }

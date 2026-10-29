@@ -84,13 +84,29 @@ final class TripStore: ObservableObject {
         }
     }
 
-    func addGear(name: String, category: String) {
+    func addGear(name: String, category: String, detail: String = "Custom item") {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        update { $0.gear.append(GearItem(name: trimmed, detail: "Custom item", category: category)) }
+        update { t in
+            guard !t.gear.contains(where: { Self.same($0.name, trimmed) }) else { return }
+            t.gear.append(GearItem(name: trimmed, detail: detail, category: category))
+        }
     }
 
+    func addSuggestion(_ s: GearSuggestion) { addGear(name: s.name, category: s.category, detail: s.detail) }
+
+    func addGameKit() { Suggestions.gameKit.forEach { addSuggestion($0) } }
+
+    /// Removes every item with this name (used by the suggestion list's tap-again-to-remove).
+    func removeGear(named name: String) { update { t in t.gear.removeAll { Self.same($0.name, name) } } }
+
+    func hasGear(named name: String) -> Bool { trip.gear.contains { Self.same($0.name, name) } }
+
     func deleteGear(_ id: UUID) { update { $0.gear.removeAll { $0.id == id } } }
+
+    nonisolated static func same(_ a: String, _ b: String) -> Bool {
+        a.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(b.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+    }
 
     // MARK: Food
 
@@ -100,13 +116,30 @@ final class TripStore: ObservableObject {
         }
     }
 
-    func addFood(name: String, cost: Double) {
+    func addFood(name: String, cost: Double, detail: String = "Custom item", category: String? = nil) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        update { $0.food.append(FoodItem(name: trimmed, detail: "Custom item", estCost: max(0, cost))) }
+        update { t in
+            guard !t.food.contains(where: { Self.same($0.name, trimmed) }) else { return }
+            t.food.append(FoodItem(name: trimmed, detail: detail, estCost: max(0, cost), category: category ?? "Added by you"))
+        }
     }
 
+    func addSuggestion(_ s: FoodSuggestion) { addFood(name: s.name, cost: s.cost, detail: s.detail, category: s.category) }
+
+    func removeFood(named name: String) { update { t in t.food.removeAll { Self.same($0.name, name) } } }
+
+    func hasFood(named name: String) -> Bool { trip.food.contains { Self.same($0.name, name) } }
+
     func deleteFood(_ id: UUID) { update { $0.food.removeAll { $0.id == id } } }
+
+    // MARK: Games
+
+    func toggleGame(_ id: String) {
+        update { t in
+            if let i = t.games.firstIndex(where: { $0.id == id }) { t.games[i].packed.toggle() }
+        }
+    }
 
     // MARK: Sights, routes, places
 

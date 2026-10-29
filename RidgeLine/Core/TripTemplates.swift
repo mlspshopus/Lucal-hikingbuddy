@@ -45,28 +45,36 @@ enum Starter {
             g("Trash Bags", "Pack out everything, including food scraps.", kitchen),
             // Housekeeping
             g("Trail Map Downloaded Offline", "Map tab → Save Area Offline while you still have signal.", "Before You Roll"),
-            g("Sunscreen, Hat & Sunglasses", "UV is strongest on the open summit.", "Before You Roll")
+            g("Sunscreen, Hat & Sunglasses", "UV is strongest on the open summit.", "Before You Roll"),
+            // Games
+            g("Playing Cards (2 Decks, Plastic)", "Plastic decks survive dew and spills.", "Games & Fun"),
+            g("Cribbage Board + Pegs", "Travel boards fit in a pocket.", "Games & Fun"),
+            g("Dice Set (6 Dice) + Cup", "For Farkle and a hundred other games.", "Games & Fun"),
+            g("Score Pad & Pencils", "Pencils write when it's damp.", "Games & Fun")
         ]
     }
 
     static func food() -> [FoodItem] {
-        func f(_ n: String, _ d: String, _ c: Double) -> FoodItem { FoodItem(name: n, detail: d, estCost: c) }
+        func f(_ n: String, _ d: String, _ c: Double, _ cat: String) -> FoodItem {
+            FoodItem(name: n, detail: d, estCost: c, category: cat)
+        }
+        let must = "Essentials"
         return [
-            f("5-Gal Drinking Water Jugs (×2)", "No tap water at dispersed sites — about a gallon per person per day plus cooking.", 16),
-            f("Trail Mix / Almonds / M&Ms", "The classic summit fuel.", 14),
-            f("Beef Jerky & Protein Bars", "Shelf-stable and bear-resistant when stored in the cab.", 18),
-            f("Honey Stinger Waffles", "Easy quick-carb snack for the climb.", 12),
-            f("Electrolyte Packets", "Mix into the water bladders.", 10),
-            f("Bagels", "Breakfast and trail lunch.", 4),
-            f("Peanut Butter / Honey", "Bagel topper and emergency calories.", 8),
-            f("Steak / Burgers / Foil-Packet Dinners", "Tailgate dinner for two — foil packets mean zero dishes.", 35),
-            f("Eggs", "For chilly mountain mornings; pack in a crush-proof carton.", 5),
-            f("Precooked Bacon", "Heats in minutes on the stove.", 7),
-            f("Coffee", "Ground for the French press.", 9),
-            f("Firewood Bundles", "Buy locally in Blairsville/Helen — don't move firewood between regions.", 21),
-            f("Bagged Ice", "Top up the cooler on the way in.", 6),
-            f("Coleman Green Propane Cylinders (2-pack)", "Fuel for the tailgate stove.", 10),
-            f("Apples / Oranges", "Fresh fruit that survives the pack.", 6)
+            f("5-Gal Drinking Water Jugs (×2)", "No tap water at dispersed sites — about a gallon per person per day plus cooking.", 16, must),
+            f("Trail Mix / Almonds / M&Ms", "The classic summit fuel.", 14, must),
+            f("Beef Jerky & Protein Bars", "Shelf-stable and bear-resistant when stored in the cab.", 18, must),
+            f("Honey Stinger Waffles", "Easy quick-carb snack for the climb.", 12, must),
+            f("Electrolyte Packets", "Mix into the water bladders.", 10, must),
+            f("Bagels", "Breakfast and trail lunch.", 4, must),
+            f("Peanut Butter / Honey", "Bagel topper and emergency calories.", 8, must),
+            f("Steak / Burgers / Foil-Packet Dinners", "Tailgate dinner for two — foil packets mean zero dishes.", 35, must),
+            f("Eggs", "For chilly mountain mornings; pack in a crush-proof carton.", 5, must),
+            f("Precooked Bacon", "Heats in minutes on the stove.", 7, must),
+            f("Coffee", "Ground for the French press.", 9, must),
+            f("Firewood Bundles", "Buy locally in Blairsville/Helen — don't move firewood between regions.", 21, must),
+            f("Bagged Ice", "Top up the cooler on the way in.", 6, must),
+            f("Coleman Green Propane Cylinders (2-pack)", "Fuel for the tailgate stove.", 10, must),
+            f("Apples / Oranges", "Fresh fruit that survives the pack.", 6, must)
         ]
     }
 }
@@ -232,7 +240,8 @@ extension Trip {
             legs: legs, sights: sights,
             gear: Starter.gear(vehicleShort: "RAM", hike: "Blood Mountain"),
             food: Starter.food(),
-            fuel: .ramBloodMountain())
+            fuel: .ramBloodMountain(),
+            games: Starter.games())
     }
 
     /// A fresh copy of this trip (new id, checklist progress reset) for planning a repeat or similar trip.
@@ -252,6 +261,7 @@ extension Trip {
         Trip(name: name, subtitle: "New trip", vehicle: vehicle, vehicleShort: vehicleShort,
              gear: Starter.gear(vehicleShort: vehicleShort, hike: "Trail"),
              food: Starter.food(),
-             fuel: FuelPlan())
+             fuel: FuelPlan(),
+             games: Starter.games())
     }
 }

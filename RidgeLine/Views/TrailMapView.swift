@@ -20,12 +20,16 @@ struct TrailMapView: View {
     @State private var panel: Panel = .routes
     @State private var proxy = MapProxy()
     @State private var selectedPlace: Place?
-    @State private var pendingPlan: OfflineDownloader.Plan?
+    @State private var isFullScreen = false
+    @State private var showOffline = false
+    @State private var offlineScope: OfflineScope = .visible
+    @State private var offlineRegion: MKCoordinateRegion?
+    @State private var showDiscovery = false
+    @State private var discoveryCenter = Coord(34.7398, -83.9378)
     @State private var showImporter = false
     @State private var importMessage: String?
     @State private var showPinAlert = false
     @State private var pinName = ""
-    @State private var confirmClear = false
     @Environment(\.openURL) private var openURL
 
     private var trip: Trip { store.trip }
@@ -34,14 +38,18 @@ struct TrailMapView: View {
         NavigationStack {
             GeometryReader { geo in
                 VStack(spacing: 0) {
-                    mapArea.frame(height: geo.size.height * 0.5)
-                    Divider().overlay(RL.border)
-                    panelArea
+                    mapArea.frame(height: isFullScreen ? geo.size.height : geo.size.height * 0.5)
+                    if !isFullScreen {
+                        Divider().overlay(RL.border)
+                        panelArea
+                    }
                 }
             }
             .rlScreen()
             .navigationTitle("Trail Map")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(isFullScreen ? .hidden : .visible, for: .navigationBar)
+            .toolbar(isFullScreen ? .hidden : .visible, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -56,6 +64,7 @@ struct TrailMapView: View {
                 ToolbarItem(placement: .topBarTrailing) { TripMenuButton() }
             }
             .onAppear { location.start() }
+            .animation(.easeInOut(duration: 0.25), value: isFullScreen)
             .alert("Pin Current Location", isPresented: $showPinAlert) {
                 TextField("Name (e.g. Our campsite)", text: $pinName)
                 Button("Save") { pinCurrentLocation() }
@@ -67,30 +76,36 @@ struct TrailMapView: View {
                 PlaceDetailSheet(place: place)
                     .presentationDetents([.medium, .large])
             }
-            .confirmationDialog(
-                "Save this area offline?",
-                isPresented: Binding(get: { pendingPlan != nil }, set: { if !$0 { pendingPlan = nil } }),
-                titleVisibility: .visible
-            ) {
-                Button("Download Topo Tiles") {
-                    if let plan = pendingPlan { downloader.start(plan) }
-                    pendingPlan = nil
-                }
-                Button("Cancel", role: .cancel) { pendingPlan = nil }
-            } message: {
-                if let plan = pendingPlan {
-                    Text("About \(plan.tiles.count) tiles (~\(Int(plan.estimatedMB.rounded())) MB), zoomed in to level \(plan.maxZoom). Only the Topo layer works offline.")
-                }
+            .sheet(isPresented: $showOffline) {
+                OfflineMapsSheet(downloader: downloader, region: offlineRegion, trip: trip,
+                                 initialScope: offlineScope, initialSource: layer.tileSource ?? .topo)
             }
-            .confirmationDialog("Delete all saved offline maps?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Delete Offline Maps", role: .destructive) { downloader.clearAll() }
-                Button("Cancel", role: .cancel) {}
+            .sheet(isPresented: $showDiscovery) {
+                TrailDiscoverySheet(center: discoveryCenter) { route in
+                    store.addRoute(route)
+                    proxy.fit(route.path)
+                }
             }
             .fileImporter(isPresented: $showImporter,
                           allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml, .xml]) { result in
                 importGPX(result)
             }
         }
+    }
+
+    private func openOffline(_ scope: OfflineScope) {
+        offlineScope = scope
+        offlineRegion = proxy.visibleRegion
+        showOffline = true
+    }
+
+    private func openDiscovery() {
+        if let r = proxy.visibleRegion {
+            discoveryCenter = Coord(r.center.latitude, r.center.longitude)
+        } else {
+            discoveryCenter = mapCenter
+        }
+        showDiscovery = true
     }
 
     // MARK: Map
@@ -108,16 +123,14 @@ struct TrailMapView: View {
                         initialCenter: mapCenter,
                         proxy: proxy,
                         onSelectPlace: { selectedPlace = $0 })
+                .ignoresSafeArea(.container, edges: isFullScreen ? .all : [])
 
             VStack(spacing: 8) {
-                Picker("Map layer", selection: $layer) {
-                    ForEach(MapLayer.allCases) { Text($0.rawValue).tag($0) }
+                HStack(alignment: .top, spacing: 8) {
+                    layerMenu
+                    Spacer(minLength: 0)
+                    if isFullScreen { fullScreenTripChip }
                 }
-                .pickerStyle(.segmented)
-                .padding(4)
-                .background(RL.card.opacity(0.95))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(RL.border, lineWidth: 1))
 
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) { statusBanners }
@@ -125,8 +138,8 @@ struct TrailMapView: View {
                     VStack(spacing: 8) { mapButtons }
                 }
                 Spacer(minLength: 0)
-                if layer == .topo {
-                    Text(USGSTopo.attribution)
+                if let source = layer.tileSource {
+                    Text("\(source.title): \(TileSource.attribution)")
                         .font(RL.font(.caption2, .semibold))
                         .foregroundStyle(RL.ink)
                         .padding(.horizontal, 8).padding(.vertical, 3)
@@ -139,8 +152,61 @@ struct TrailMapView: View {
         }
     }
 
+    private var layerMenu: some View {
+        Menu {
+            Section("Saveable for offline") {
+                ForEach(MapLayer.allCases.filter(\.worksOffline)) { l in layerButton(l) }
+            }
+            Section("Needs a connection") {
+                ForEach(MapLayer.allCases.filter { !$0.worksOffline }) { l in layerButton(l) }
+            }
+        } label: {
+            Label(layer.title, systemImage: "square.3.layers.3d")
+                .font(RL.font(.subheadline, .bold))
+                .foregroundStyle(RL.pine)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(RL.card.opacity(0.95))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(RL.border, lineWidth: 1))
+        }
+        .accessibilityLabel("Map layer: \(layer.title)")
+    }
+
+    private func layerButton(_ l: MapLayer) -> some View {
+        Button {
+            layer = l
+        } label: {
+            if l == layer {
+                Label(l.title, systemImage: "checkmark")
+            } else {
+                Label(l.title, systemImage: l.symbol)
+            }
+        }
+    }
+
+    /// In full screen the nav bar is hidden, so keep the active trail visible as a small chip.
+    @ViewBuilder
+    private var fullScreenTripChip: some View {
+        if let r = trip.activeRoute {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(r.name).font(RL.font(.caption, .bold)).foregroundStyle(RL.ink).lineLimit(1)
+                Text(String(format: "%.1f mi · %@", r.miles, Fmt.duration(minutes: r.estimatedMinutes)))
+                    .font(RL.font(.caption2, .semibold)).foregroundStyle(RL.blaze)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: 180, alignment: .trailing)
+            .background(RL.card.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
     @ViewBuilder
     private var mapButtons: some View {
+        mapButton(isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                  label: isFullScreen ? "Exit full screen map" : "Full screen map") {
+            isFullScreen.toggle()
+        }
         mapButton("location.fill", label: "Center on my location") {
             location.start()
             proxy.followUser()
@@ -148,11 +214,9 @@ struct TrailMapView: View {
         mapButton("scope", label: "Show active trail") {
             if let r = trip.activeRoute { proxy.fit(r.path) }
         }
-        mapButton("arrow.down.circle.fill", label: "Save visible area for offline use", tint: RL.blaze) {
-            guard let region = proxy.visibleRegion else { return }
-            pendingPlan = OfflineDownloader.plan(for: region)
+        mapButton("arrow.down.circle.fill", label: "Save maps for offline use", tint: RL.blaze) {
+            openOffline(.visible)
         }
-        .disabled(downloader.isRunning)
     }
 
     private func mapButton(_ symbol: String, label: String, tint: Color = RL.pine, action: @escaping () -> Void) -> some View {
@@ -171,7 +235,7 @@ struct TrailMapView: View {
     @ViewBuilder
     private var statusBanners: some View {
         if !network.isOnline {
-            banner("Offline · GPS still live · saved topo only", symbol: "wifi.slash", tint: RL.blaze)
+            banner("Offline · GPS still live · saved maps only", symbol: "wifi.slash", tint: RL.blaze)
         }
         if location.isDenied {
             Button {
@@ -184,7 +248,7 @@ struct TrailMapView: View {
             VStack(alignment: .leading, spacing: 4) {
                 ProgressView(value: downloader.progress).tint(RL.pine)
                 HStack {
-                    Text("Saving topo tiles… \(Int(downloader.progress * 100))%")
+                    Text("Saving maps… \(Int(downloader.progress * 100))%")
                         .font(RL.font(.caption, .semibold)).foregroundStyle(RL.ink)
                     Spacer()
                     Button("Cancel") { downloader.cancel() }
@@ -243,34 +307,46 @@ struct TrailMapView: View {
                 routeCard(route)
             }
             if trip.routes.isEmpty {
-                Text("No hiking routes yet. Import a GPX file to add one.")
+                Text("No hiking routes yet. Tap Find Trails Near Here or import a GPX file.")
                     .font(RL.font(.subheadline)).foregroundStyle(RL.slate).rlCard()
             }
+
             VStack(alignment: .leading, spacing: 10) {
-                SectionTitle(title: "GPX & Offline Maps", symbol: "arrow.down.doc.fill")
-                Text("Tap Import to add a surveyed .gpx track (AllTrails, Gaia, USFS, ATC). Imported tracks replace the guesswork of the sketched lines.")
+                SectionTitle(title: "Add More Trails", symbol: "plus.circle.fill")
+                Text("Pan the map to where you want to hike, then search. Finds named trails with their start point, length, climb and estimated time — and adds them to the map.")
                     .font(RL.font(.footnote)).foregroundStyle(RL.slate)
+                Button { openDiscovery() } label: { Label("Find Trails Near Here", systemImage: "magnifyingglass") }
+                    .buttonStyle(PrimaryButtonStyle())
                 if let m = importMessage {
                     Text(m).font(RL.font(.footnote, .semibold)).foregroundStyle(RL.blaze)
                 }
                 Button { showImporter = true } label: { Label("Import GPX Track", systemImage: "square.and.arrow.down") }
                     .buttonStyle(SecondaryButtonStyle())
-                HStack {
-                    Text("Offline topo storage: \(ByteCountFormatter.string(fromByteCount: Int64(downloader.savedBytes), countStyle: .file))")
-                        .font(RL.font(.footnote)).foregroundStyle(RL.slate)
-                    Spacer()
-                    if downloader.savedBytes > 0 {
-                        Button("Clear", role: .destructive) { confirmClear = true }
-                            .font(RL.font(.footnote, .bold))
-                    }
-                }
             }
             .rlCard()
+
+            VStack(alignment: .leading, spacing: 10) {
+                SectionTitle(title: "Offline Maps", symbol: "arrow.down.circle.fill")
+                Text("Save topo, aerial or shaded-relief maps for the whole trip, one trail, or exactly what's on screen — before you lose signal.")
+                    .font(RL.font(.footnote)).foregroundStyle(RL.slate)
+                Button { openOffline(trip.activeRoute == nil ? .visible : .activeTrail) } label: {
+                    Label("Save Maps Offline…", systemImage: "arrow.down.circle.fill")
+                }
+                .buttonStyle(PrimaryButtonStyle(tint: RL.blaze))
+                Text("Saved so far: \(ByteCountFormatter.string(fromByteCount: Int64(downloader.totalSavedBytes), countStyle: .file))")
+                    .font(RL.font(.footnote)).foregroundStyle(RL.slate)
+            }
+            .rlCard()
+
+            TrailResourcesCard()
         }
     }
 
     private func routeCard(_ route: HikeRoute) -> some View {
         let active = route.id == trip.activeRoute?.id
+        let startPlace = route.trailheadID.flatMap { trip.place(id: $0) }
+        let startEndpoint: Endpoint? = startPlace.map { Endpoint(title: $0.name, query: nil, coord: $0.coord) }
+            ?? route.startCoord.map { Endpoint(title: "\(route.name) start", query: nil, coord: $0) }
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 Text(route.name).font(RL.font(.headline, .bold)).foregroundStyle(RL.ink)
@@ -280,10 +356,18 @@ struct TrailMapView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     Chip(text: String(format: "%.1f mi", route.miles), symbol: "ruler")
+                    Chip(text: Fmt.duration(minutes: route.estimatedMinutes), symbol: "clock.fill", tint: RL.blaze)
                     Chip(text: route.gainFt > 0 ? "+\(route.gainFt.formatted()) ft" : "Mostly flat", symbol: "arrow.up.right")
                     Chip(text: route.difficulty, symbol: "flame.fill", tint: RL.blaze)
                     Chip(text: route.style, symbol: route.style == "Loop" ? "arrow.triangle.2.circlepath" : "arrow.left.arrow.right")
                 }
+            }
+            if let startPlace {
+                Label("Starts at \(startPlace.name)", systemImage: "flag.fill")
+                    .font(RL.font(.footnote, .semibold)).foregroundStyle(RL.pine)
+            } else if let c = route.startCoord {
+                Label("Starts at \(c.label)", systemImage: "flag.fill")
+                    .font(RL.font(.footnote, .semibold)).foregroundStyle(RL.pine)
             }
             Text(route.blurb).font(RL.font(.subheadline)).foregroundStyle(RL.slate)
             if route.isSketchPath {
@@ -299,11 +383,17 @@ struct TrailMapView: View {
                 }
                 .buttonStyle(PrimaryButtonStyle(tint: active ? RL.pine : RL.blaze))
 
-                if let th = route.trailheadID.flatMap({ trip.place(id: $0) }) {
-                    DirectionsMenu(to: Endpoint(title: th.name, query: nil, coord: th.coord))
-                        .frame(maxWidth: .infinity)
+                if let startEndpoint {
+                    DirectionsMenu(to: startEndpoint).frame(maxWidth: .infinity)
                 }
             }
+            Button {
+                store.setActiveRoute(route.id)
+                openOffline(.activeTrail)
+            } label: {
+                Label("Save This Trail Offline", systemImage: "arrow.down.circle")
+            }
+            .buttonStyle(SecondaryButtonStyle())
         }
         .rlCard()
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)

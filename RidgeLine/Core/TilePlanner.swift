@@ -9,10 +9,6 @@ struct TilePath: Hashable, Sendable {
 /// Web-Mercator slippy-map tile math for the offline topo downloader.
 enum TilePlanner {
     static let minZoom = 10
-    static let maxZoomCap = 16
-    static let maxTiles = 2500
-    /// Rough average size of a USGS Topo tile, for the "about N MB" estimate.
-    static let averageTileBytes = 30_000
 
     static func tileX(lon: Double, z: Int) -> Int {
         let n = pow(2.0, Double(z))
@@ -55,17 +51,79 @@ enum TilePlanner {
         return total
     }
 
-    /// Picks the deepest zoom (≤ 16) whose tile count for the box stays under `maxTiles`.
-    static func plan(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) -> (tiles: [TilePath], maxZoom: Int) {
-        var best: (tiles: [TilePath], maxZoom: Int)?
-        var z = maxZoomCap
-        while z >= minZoom {
-            if count(minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon, zooms: minZoom...z) <= maxTiles {
-                best = (tiles(minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon, zooms: minZoom...z), z)
-                break
-            }
-            z -= 1
+    // MARK: Scopes
+
+    /// Total tile requests (across all chosen layers) allowed in one download — keeps us a polite USGS client.
+    static let hardCap = 6000
+
+    enum Geometry {
+        case box(minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)
+        /// Every tile within `bufferMeters` of any of the paths (a "corridor" along trails).
+        case corridor(paths: [[Coord]], bufferMeters: Double)
+    }
+
+    static func count(_ g: Geometry, zooms: ClosedRange<Int>) -> Int {
+        switch g {
+        case let .box(minLat, maxLat, minLon, maxLon):
+            return count(minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon, zooms: zooms)
+        case .corridor:
+            return tiles(g, zooms: zooms).count
         }
-        return best ?? (tiles(minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon, zooms: minZoom...minZoom), minZoom)
+    }
+
+    static func tiles(_ g: Geometry, zooms: ClosedRange<Int>) -> [TilePath] {
+        switch g {
+        case let .box(minLat, maxLat, minLon, maxLon):
+            return tiles(minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon, zooms: zooms)
+        case let .corridor(paths, buffer):
+            return corridorTiles(paths: paths, bufferMeters: buffer, zooms: zooms)
+        }
+    }
+
+    static func corridorTiles(paths: [[Coord]], bufferMeters: Double, zooms: ClosedRange<Int>) -> [TilePath] {
+        var found = Set<TilePath>()
+        for z in zooms {
+            let n = 1 << z
+            for path in paths where !path.isEmpty {
+                let meanLat = path.reduce(0.0) { $0 + $1.lat } / Double(path.count)
+                let tileMeters = 40_075_016.686 * cos(meanLat * Double.pi / 180) / Double(n)
+                let r = max(0, Int(ceil(bufferMeters / tileMeters)))
+                var lastX = -1, lastY = -1
+
+                func add(_ c: Coord) {
+                    let x = tileX(lon: c.lon, z: z), y = tileY(lat: c.lat, z: z)
+                    if x == lastX && y == lastY { return }
+                    lastX = x
+                    lastY = y
+                    for dx in -r...r {
+                        for dy in -r...r {
+                            let xx = x + dx, yy = y + dy
+                            if xx >= 0, xx < n, yy >= 0, yy < n { found.insert(TilePath(z: z, x: xx, y: yy)) }
+                        }
+                    }
+                }
+
+                add(path[0])
+                for (a, b) in zip(path, path.dropFirst()) {
+                    let d = GPXTrack.haversine(a, b)
+                    let steps = max(1, Int(ceil(d / (tileMeters / 2))))
+                    for i in 1...steps {
+                        let t = Double(i) / Double(steps)
+                        add(Coord(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t))
+                    }
+                }
+            }
+        }
+        return found.sorted { ($0.z, $0.x, $0.y) < ($1.z, $1.x, $1.y) }
+    }
+
+    /// Bounding box of coordinates with a fractional pad on each side.
+    static func box(around coords: [Coord], pad: Double = 0.1) -> Geometry? {
+        guard !coords.isEmpty else { return nil }
+        let lats = coords.map(\.lat), lons = coords.map(\.lon)
+        let latPad = max((lats.max()! - lats.min()!) * pad, 0.005)
+        let lonPad = max((lons.max()! - lons.min()!) * pad, 0.005)
+        return .box(minLat: lats.min()! - latPad, maxLat: lats.max()! + latPad,
+                    minLon: lons.min()! - lonPad, maxLon: lons.max()! + lonPad)
     }
 }

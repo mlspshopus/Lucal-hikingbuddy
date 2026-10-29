@@ -14,17 +14,8 @@ struct GPXTrack {
         return meters / 1609.344
     }
 
-    /// Cumulative climb in feet. Ignores ±1 m jitter so GPS noise doesn't inflate the number.
-    var gainFt: Int {
-        guard elevationsMeters.count > 1 else { return 0 }
-        var gain = 0.0
-        var anchor = elevationsMeters[0]
-        for e in elevationsMeters.dropFirst() {
-            if e - anchor > 1 { gain += e - anchor; anchor = e }
-            else if anchor - e > 1 { anchor = e }
-        }
-        return Int((gain * 3.28084).rounded())
-    }
+    /// Cumulative climb in feet.
+    var gainFt: Int { HikeMath.gainFt(elevationsMeters: elevationsMeters) }
 
     static func haversine(_ a: Coord, _ b: Coord) -> Double {
         let r = 6_371_000.0
